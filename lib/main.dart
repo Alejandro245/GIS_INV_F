@@ -2,6 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+// ================= PERSONA REGISTRADA EN MEMORIA =================
+Map<String, dynamic>? personaRegistrada;
+
+// Número de emergencia por defecto (ECU 911)
+const String numeroEmergenciaDefecto = "911";
+
 void main() {
   runApp(const MyApp());
 }
@@ -29,7 +35,7 @@ class HomePage extends StatelessWidget {
     bool serviceEnabled;
     LocationPermission permission;
 
-    // Verificar si el GPS está activo
+    // Verificar GPS
     serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       debugPrint('GPS desactivado');
@@ -59,8 +65,20 @@ class HomePage extends StatelessWidget {
     debugPrint("Latitud: ${position.latitude}");
     debugPrint("Longitud: ${position.longitude}");
 
-    // Llamada automática de emergencia
-    final Uri tel = Uri.parse("tel:0999999999");
+    // 📞 Elegir número de llamada
+    String telefonoLlamada;
+
+    if (personaRegistrada == null) {
+      // No registrado → número por defecto
+      telefonoLlamada = numeroEmergenciaDefecto;
+      debugPrint('Llamada a emergencia por defecto');
+    } else {
+      // Registrado → contacto de emergencia
+      telefonoLlamada = personaRegistrada!['emergencia'];
+      debugPrint('Llamada a contacto registrado');
+    }
+
+    final Uri tel = Uri.parse("tel:$telefonoLlamada");
     await launchUrl(tel);
   }
 
@@ -75,7 +93,7 @@ class HomePage extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // BOTÓN DE PÁNICO
+            // BOTÓN DE PÁNICO (SIEMPRE ACTIVO)
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red,
@@ -120,7 +138,7 @@ class _RegistroPersonaPageState extends State<RegistroPersonaPage> {
   final TextEditingController cedulaController = TextEditingController();
   final TextEditingController nombresController = TextEditingController();
   final TextEditingController apellidosController = TextEditingController();
-  final TextEditingController generoController = TextEditingController();
+  String generoSeleccionado = 'M';
   final TextEditingController edadController = TextEditingController();
   final TextEditingController celularController = TextEditingController();
   final TextEditingController emergenciaController = TextEditingController();
@@ -147,9 +165,30 @@ class _RegistroPersonaPageState extends State<RegistroPersonaPage> {
               controller: apellidosController,
               decoration: const InputDecoration(labelText: 'Apellidos'),
             ),
-            TextField(
-              controller: generoController,
-              decoration: const InputDecoration(labelText: 'Género'),
+            const SizedBox(height: 10),
+            const Text(
+              'Género',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            RadioListTile<String>(
+              title: const Text('Masculino'),
+              value: 'M',
+              groupValue: generoSeleccionado,
+              onChanged: (value) {
+                setState(() {
+                  generoSeleccionado = value!;
+                });
+              },
+            ),
+            RadioListTile<String>(
+              title: const Text('Femenino'),
+              value: 'F',
+              groupValue: generoSeleccionado,
+              onChanged: (value) {
+                setState(() {
+                  generoSeleccionado = value!;
+                });
+              },
             ),
             TextField(
               controller: edadController,
@@ -170,18 +209,22 @@ class _RegistroPersonaPageState extends State<RegistroPersonaPage> {
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: () {
-                debugPrint('Cédula: ${cedulaController.text}');
-                debugPrint('Nombres: ${nombresController.text}');
-                debugPrint('Apellidos: ${apellidosController.text}');
-                debugPrint('Género: ${generoController.text}');
-                debugPrint('Edad: ${edadController.text}');
-                debugPrint('Celular: ${celularController.text}');
-                debugPrint(
-                    'Contacto Emergencia: ${emergenciaController.text}');
+                personaRegistrada = {
+                  "cedula": cedulaController.text,
+                  "nombres": nombresController.text,
+                  "apellidos": apellidosController.text,
+                  "genero": generoSeleccionado,
+                  "edad": edadController.text,
+                  "celular": celularController.text,
+                  "emergencia": emergenciaController.text,
+                };
 
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Persona registrada')),
+                  const SnackBar(
+                      content: Text('Persona registrada correctamente')),
                 );
+
+                Navigator.pop(context);
               },
               child: const Text('GUARDAR'),
             ),
