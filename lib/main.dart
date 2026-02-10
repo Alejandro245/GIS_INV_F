@@ -5,7 +5,11 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 // ================= CONFIG API =================
-const String apiBaseUrl = "http://10.0.2.2:3000";
+const String personaUrl =
+    "https://katabolically-tuberculate-karen.ngrok-free.dev/persona";
+
+const String asaltoUrl =
+    "https://katabolically-tuberculate-karen.ngrok-free.dev/asalto";
 
 // ================= PERSONA REGISTRADA =================
 Map<String, dynamic>? personaRegistrada;
@@ -34,54 +38,104 @@ class MyApp extends StatelessWidget {
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
-  Future<void> reportarAsalto(BuildContext context) async {
-    print("🟡 INICIANDO REPORTE DE ASALTO");
-
+  // ===== OBTENER UBICACIÓN REAL (ANDROID 12 OK) =====
+  Future<Position?> obtenerUbicacionReal() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      print("🔴 GPS DESACTIVADO");
-      return;
+      await Geolocator.openLocationSettings();
+      return null;
     }
 
     LocationPermission permission = await Geolocator.checkPermission();
+
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) return;
     }
 
-    if (permission == LocationPermission.deniedForever) return;
+    if (permission == LocationPermission.deniedForever) {
+      await Geolocator.openAppSettings();
+      return null;
+    }
 
-    Position position = await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.high,
+    if (permission != LocationPermission.whileInUse &&
+        permission != LocationPermission.always) {
+      return null;
+    }
+
+    try {
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 10),
+      );
+    } catch (e) {
+      print("❌ ERROR GPS REAL: $e");
+      return null;
+    }
+  }
+
+  // ===== REPORTAR ASALTO (CORREGIDO) =====
+  Future<void> reportarAsalto(BuildContext context) async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Obteniendo ubicación GPS...')),
     );
 
-    print("📍 LAT: ${position.latitude}");
-    print("📍 LNG: ${position.longitude}");
+    final position = await obtenerUbicacionReal();
 
-    // Enviar asalto a la API
-    try {
-      final response = await http.post(
-        Uri.parse("$apiBaseUrl/asalto"),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          "descripcion": "Asalto reportado desde Flutter",
-          "persona_id": personaRegistrada?["id"],
-          "lat": position.latitude,
-          "lng": position.longitude,
-        }),
+    if (position == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo obtener ubicación')),
       );
-
-      print("🟢 ASALTO STATUS: ${response.statusCode}");
-    } catch (e) {
-      print("🔥 ERROR HTTP ASALTO: $e");
+      return;
     }
 
-    // Llamada telefónica
-    String telefono = personaRegistrada == null
+    // ===== JSON DINÁMICO (CLAVE PARA ANDROID 12) =====
+    final Map<String, dynamic> body = {
+      "descripcion": "Asalto reportado desde Flutter",
+      "lat": position.latitude,
+      "lng": position.longitude,
+    };
+
+    if (personaRegistrada != null) {
+      body["persona_id"] = personaRegistrada!["id"];
+    }
+
+    print("📦 JSON ENVIADO: $body");
+
+    try {
+      final response = await http.post(
+        Uri.parse(asaltoUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(body),
+      );
+
+      print("📨 STATUS: ${response.statusCode}");
+      print("📨 BODY: ${response.body}");
+
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        throw Exception("Error backend");
+      }
+    } catch (e) {
+      print("🔥 ERROR POST: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error enviando asalto')),
+      );
+      return;
+    }
+
+    // ===== LLAMADA DE EMERGENCIA =====
+    final String telefono = personaRegistrada == null
         ? numeroEmergenciaDefecto
         : personaRegistrada!["emergencia"];
 
-    await launchUrl(Uri.parse("tel:$telefono"));
+    final Uri dialUri = Uri(
+      scheme: 'tel',
+      path: telefono,
+    );
+
+    await launchUrl(
+      dialUri,
+      mode: LaunchMode.externalApplication,
+    );
   }
 
   @override
@@ -103,7 +157,7 @@ class HomePage extends StatelessWidget {
               onPressed: () => reportarAsalto(context),
               child: const Text(
                 'REPORTAR ASALTO',
-                style: TextStyle(fontSize: 22),
+                style: TextStyle(fontSize: 22, color: Colors.white),
               ),
             ),
             const SizedBox(height: 20),
@@ -144,55 +198,35 @@ class _RegistroPersonaPageState extends State<RegistroPersonaPage> {
   String generoSeleccionado = 'M';
 
   Future<void> guardarPersona() async {
-    print("🟡 ENVIANDO PERSONA A LA API");
-
-    if (edadController.text.isEmpty) {
-      print("🔴 EDAD VACÍA");
-      return;
-    }
-
-    int edad;
-    try {
-      edad = int.parse(edadController.text);
-    } catch (e) {
-      print("🔴 EDAD NO NUMÉRICA");
-      return;
-    }
+    if (edadController.text.isEmpty) return;
 
     try {
       final response = await http.post(
-        Uri.parse("$apiBaseUrl/persona"),
+        Uri.parse(personaUrl),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           "cedula": cedulaController.text,
           "nombres": nombresController.text,
           "apellidos": apellidosController.text,
           "genero": generoSeleccionado,
-          "edad": edad,
+          "edad": int.parse(edadController.text),
           "celular": celularController.text,
           "contacto_emergencia": emergenciaController.text,
         }),
       );
 
-      print("🟢 PERSONA STATUS: ${response.statusCode}");
-      print("🟢 BODY: ${response.body}");
-
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
         final data = jsonDecode(response.body);
-
         personaRegistrada = {
           "id": data["persona_id"],
           "emergencia": emergenciaController.text,
         };
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Persona registrada en la BD')),
-        );
-
         Navigator.pop(context);
       }
     } catch (e) {
-      print("🔥 ERROR HTTP PERSONA: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error registrando persona')),
+      );
     }
   }
 
